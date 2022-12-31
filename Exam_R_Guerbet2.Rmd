@@ -1,0 +1,244 @@
+---
+title: "Overfishing problematics: How to keep the spearfishing spirit alive in Australia"
+author: "Arnaud Guerbet"
+date: "2022-12-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library (dplyr)
+library(yarrr)
+library(tidyr)
+library(ggplot2)
+library(MASS)
+library(gvlma)
+library(car)
+```
+
+## Introduction
+
+Spearfishing is a very technical and intensive sport based on the connection of fishes and barbecues. However, this sport become more and more limited by the over fishing we can observed all around the world. Therefore, to save the spearfishing spirit, this study was made to define the best region of Australia for spearfishing based on the biomass, the size and the abundance of the most common fishes family targeted by spearfishing. 
+First, we will compare the total biomass and the family composition among region and then we will focus on the most interesting area to identify the abundance and the size distribution of these different families. 
+
+## Materials & Methods
+The data were collected all around Australia by underwater visual census (UVC) by SCUBA divers along a 50m transect line. All fish species observed within 5m of the transect line were recorded. In this dataset, seven region (i.e., New South Wales; Western Australia; Tasmania; Victoria; South Australia; Queensland; Other Territories) were recorded and fish abundance, size and biomass were measured. 
+A selection of the most common fishes family (i.e., Carangidae,Haemulidae, Kyphosidae, Labridae, Lethrinidae, Lutjanidae, Mullidae, Scaridae,Serranidae) for spearfishing was performed. 
+
+## Code & Analyses
+```{r data}
+setwd("C:/Users/ASUS/Desktop/NTU_Courses/R courses")
+data<-read.csv('data_fish.csv',header=T, sep=",", dec='.')
+
+#MANIPULATE THE DATA
+#selection of the column
+data2 <- dplyr::select(data,c(4:5,7:9,24:25, 27:29))
+
+#Focus on the family for spearfishing
+data3<- data2[data2$family %in% c("Carangidae","Haemulidae", "Kyphosidae","Labridae","Lethrinidae", "Lutjanidae", "Mullidae", "Scaridae","Serranidae"),]
+#Arrange table
+data3 <- arrange(data3, area)
+
+```
+
+### Selection of region
+The other territories were exclude of the study because this region is characterized by only two sites, which is not enough to compare to the other region. Queensland is also characterized by only two sites so a combination of Queensland and New South Wales was chosen to define the Eastern Australia region. 
+
+
+```{r data1}
+#Exclude Other territories 
+data3<-data3[c(-6897:-6998),]
+#Combine Queensland and New South Wales to Eastern Australia
+data3$area[data3$area == 'Queensland'] <- 'Eastern Autralia'
+data3$area[data3$area == 'New South Wales'] <- 'Eastern Autralia'
+data3 <- arrange(data3, area)#arrange again 
+
+```
+
+### Region
+First, I decide to focus on the comparison of the fish biomass among region to define which region is more productive than the others. I apply a KruskalWallis test because the homoscedasticity is not accepted here.  
+
+```{r region}
+#Sum of the family biomass by site
+bio_reg<-aggregate(data3$biomass,list (data3$area,data3$location,data3$ecoregion, data3$site_name),sum, na.rm=TRUE)
+colnames(bio_reg)<-c('Area', 'Ecoregion', 'Location', 'Site', 'Biomass')
+bio_reg$Biomass_log<-log(bio_reg$Biomass)
+boxplot(Biomass_log ~ Area, data = bio_reg)
+
+#statistic
+bartlett.test(Biomass~Area,data=bio_reg)#No homogeneous variance. So we can not use ANOVA
+kruskal.test(Biomass ~ Area, data = bio_reg)#Difference between Area
+pairwise.wilcox.test(bio_reg$Biomass, bio_reg$Area, p.adjust.method = "bonferroni")
+```
+
+We can observe that the eastern Australia and Western Australia are the most productive area of spearfishing fish family. 
+
+### Family composition 
+In a second time, we target the diversity and the composition of fish family to estimate in which region we can have the most diversity of taste in our plates. 
+For that, I process a test of proportion (Chi-square test) between regions. 
+
+```{r family}
+#FISH COMPOSITION 
+bio_fam<-aggregate(data3$biomass,list (data3$area,data3$family),sum,na.rm=TRUE)
+colnames(bio_fam)<-c('Area', 'Family', 'Biomass')
+
+#Graph
+ggplot(bio_fam, aes(fill=Family, y=Biomass, x=Area)) + 
+  geom_bar(position="fill", stat="identity") +
+  xlab("Region") +
+  ylab("Proportion (%)") +
+  labs(fill = "Family")
+
+#Test
+bio_fam2 <- pivot_wider(bio_fam, names_from = Family, values_from = Biomass)
+bio_fam2 <- dplyr::select(bio_fam2,c(2:10))
+bio_fam2[is.na(bio_fam2)] <- 0#To be able to run the test I need to have the same number of category between region. So NA value were replace by 0, which is the proportion of biomass observe. In the smapling effort. 
+
+row.names(bio_fam2)<-c("Eastern Autralia","Victoria", "Western Australia","South Australia", "Tasmania")
+
+chisq.test(bio_fam2[c(1,2),])
+chisq.test(bio_fam2[c(1,3),])
+chisq.test(bio_fam2[c(1,4),])
+chisq.test(bio_fam2[c(1,5),])
+chisq.test(bio_fam2[c(2,3),])
+chisq.test(bio_fam2[c(2,4),])
+chisq.test(bio_fam2[c(2,5),])
+chisq.test(bio_fam2[c(3,4),])
+chisq.test(bio_fam2[c(3,5),])
+chisq.test(bio_fam2[c(4,5),])
+```
+
+All the region differed among each other in term of family composition. We can obviously observe that the Eastern Australia and the Western Australia present the most diversify composition compared to the other species. 
+
+###Define if biomass is more explained by the abundance or size of species
+We saw that the Eastern part and the Western part of Australia are the most interesting region for spearfishing in function of the total biomass and the composition of fishes family. 
+However, it exist different strategy of spearfishing. Some peoples target less fishes but bigger, instead some other prefer to catch smaller fish a biggest quantity.
+So, in this part we try to estimate if the biomass is more explained by the size or the abundance of fishes in the Eastern and Werstern part of Australia.
+
+```{r model}
+data4<-data3[c(-7054:-8569),]#Keep only Eastern and Western Australia
+fit1 <- lm(biomass ~ size_class + total, data = na.omit(data4))
+summary(fit1)
+layout(matrix(c(1,2,3,4),2,2))
+plot(fit1)
+
+#boxcox transformation
+boxcoxfit <- boxcox(fit1,plotit=T)
+lambda <- boxcoxfit$x[which.max(boxcoxfit$y)]
+new_fit <- lm(((data4$biomass^lambda-1)/lambda) ~ size_class + total, data = data4)
+new_fit2 <- lm(log(data4$biomass) ~ size_class + total, data = data4)
+gvlma(new_fit)#not better at all
+gvlma(new_fit2)#not better at all
+
+#bootstrap
+sqrt(car::vif(fit1))#<2 so okay
+
+fit2 <- Boot(fit1, f=coef, R=1000, method=c("case"))
+summary(fit2, high.moments=T)
+plot(fit2)#Looks okay.
+
+#Selection variables
+mod1<-lm(biomass ~ size_class + total, data = na.omit(data4))
+mod2<-lm(biomass ~ size_class, data = na.omit(data4))
+mod3<-lm(biomass ~ total, data = na.omit(data4))
+
+anova(mod1,mod2)
+anova(mod1,mod3)
+anova(mod2,mod3)
+
+BIC(mod1); BIC(mod2); BIC(mod3)
+AIC(mod1); AIC(mod2); AIC(mod3)
+step1 <- stepAIC(fit1, direction="both")
+step1$anova 
+
+n<-dim(data3)[1]
+step2 <- stepAIC(fit1, k=log(n), direction="both")
+step2$anova
+```
+
+So both of the factor, size and abundance explain the biomass of fish in the two part of Australia.
+So now, we'll try to compare the size and abundance of fish in the two regions. 
+
+### focus on the size and the abundance in West and Eastern of Australia.
+
+```{r size}
+#SIZE-CLASS
+#By region 
+size_fam<-aggregate(data4$size_class,list (data4$area,data4$family),mean,na.rm=TRUE)
+colnames(size_fam)<-c('Area', 'Family', 'Size')
+boxplot(Size ~ Area, data = size_fam)
+
+bartlett.test(Size ~ Area, data = size_fam)
+shapiro.test(size_fam$Size)
+kruskal.test(Size ~ Area, data = size_fam)#No difference between Area
+
+#by Region and Family
+ggplot(data4, aes(x=family, y=size_class, fill=area)) +
+  geom_boxplot() +
+  ylim(0, 160)+
+  facet_wrap(~area)+
+  theme(axis.text.x = element_text(angle=90, vjust=.5, hjust=1))
+
+#East
+data_east<-data4[c(0:7053),]
+bartlett.test(size_class ~ family, data = data_east)
+kruskal.test(size_class ~ family, data = data_east)
+pairwise.wilcox.test(data_east$size_class, data_east$family, p.adjust.method = "bonferroni")
+
+#West 
+data_west<-data4[c(7054:14127),]
+bartlett.test(size_class ~ family, data = data_west)
+kruskal.test(size_class ~ family, data = data_west)
+pairwise.wilcox.test(data_west$size_class, data_west$family, p.adjust.method = "bonferroni")
+```
+
+No difference a aera scales. But when we focus on family, we can observe that Haemulidae and Lethrinidae present the biggest individuals in the western Austalia. Then Scaridae and Lutjanidae show a relatively high size compare to the other. In Western Australia, we observe a size dominance of Haemulidae and a relatively high size for Carangidae, Kyphosidae and Lutjanidae.
+
+```{r abundance}
+#ABUNDANCE
+#By region 
+ab_fam<-aggregate(data4$total,list (data4$area,data4$site_name,data4$family),sum,na.rm=TRUE)#abundance per site
+colnames(ab_fam)<-c('Area', 'Site', 'Family', 'Abundance')
+ab_fam$Ab_Log<-log(ab_fam$Abundance)
+
+boxplot(Ab_Log ~ Area, data = ab_fam)
+bartlett.test(Abundance ~ Area, data = ab_fam)#No homogeneous variance. So cannot use ANOVA
+wilcox.test(Abundance ~ Area, data = ab_fam)#No difference between Area
+
+#by Region and Family
+ggplot(ab_fam, aes(x=Family, y=Ab_Log, fill=Area)) +
+  geom_boxplot() +
+  ylim(0, 10)+
+  facet_wrap(~Area)+
+  theme(axis.text.x = element_text(angle=90, vjust=.5, hjust=1))
+ab_fam <- arrange(ab_fam, Area)
+
+#East
+ab_fam_east<-ab_fam[c(0:406),]
+bartlett.test(Abundance ~ Family, data = ab_fam_east)#No homogeneous variance. So cannot use ANOVA
+kruskal.test(Abundance ~ Family, data = ab_fam_east)
+pairwise.wilcox.test(ab_fam_east$Abundance, ab_fam_east$Family, p.adjust.method = "bonferroni")
+
+#West
+ab_fam_west<-ab_fam[c(406:626),]
+bartlett.test(Abundance ~ Family, data = ab_fam_west)#No homogeneous variance. So cannot use ANOVA
+kruskal.test(Abundance ~ Family, data = ab_fam_west)
+pairwise.wilcox.test(ab_fam_west$Abundance, ab_fam_west$Family, p.adjust.method = "bonferroni")
+```
+
+In term of abundance, we do not observe any difference of abundance between East and West Australia. 
+But by region, we observe a dominance of Kyphosidae, Labridae and Carangidae in Eastern Australia. In  western Australia, we can see a clear dominance of Labridae and Scaridae. 
+
+## Discussion 
+
+The result shown that the Eastern and Western Australia are the most productive region of Australia in term of fishes targeted for spearfishing. This result can be explain by the position of the region which are between tropical and subtropical environment increasing the diversity of species by integrating tropical and subtropical species. Indeed, the fish composition of this two regions is the most diversify compare to the others. The location of the region between two climate aera can explain this particularity. When we focus in the two regions.
+
+In eastern Australia, we saw a dominance of Kyphosidae, Carangidae and Labridae. These three family are explained by a low size but it present the highest abundance compare to other family. So spear fisherman expert of the strategy "many small fishes" can seems to be more productive in Eastern Australia.
+The dominant families of Western Australia are Scaridae, Kyphosidae , and Labridae. These three species present different type of distribution. Scaridae show a middle size compare to other families and a very high abundance, that's why it define more than 50% of the total biomass. Kyphosidae species are bigger but present a lower abundance in this region. At the opposite, Labridae species are small but very abundance. This two opposite distribution present a similar effect on the total biomass showing a very similar value to total biomass proportion in the region. So Western Australia can be a good place for spear fisherman who can play the two strategies, "many small fishes" and "few big fishes". The difference of family composition of the two regions can also help the spear fisherman to chose according to their taste.
+
+Obviously, this study focus on a large scale analysis and does not allow to observe the fish composition and biomass at the local scale. It is up to the fishermen to explore the area to find the best spots.
+
+
+
+
+
